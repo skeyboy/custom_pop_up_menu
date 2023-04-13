@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'platform/platform.dart';
@@ -13,8 +14,19 @@ enum PreferredPosition {
   bottom,
 }
 
+extension CustomPopupItemConfig on List {
+  double get menuMaxWidth => min(length, 5) * PopupMenuItemConfig.itemWidth;
+
+  int get rowMaxItemCount => min(length, 5);
+}
+
+class PopupMenuItemConfig {
+  static final double itemWidth = 44.0;
+}
+
 class CustomPopupMenuController extends ChangeNotifier {
   bool menuIsShowing = false;
+  Offset localPosition = Offset.zero;
 
   void showMenu() {
     menuIsShowing = true;
@@ -76,6 +88,7 @@ class _CustomPopupMenuState extends State<CustomPopupMenu> {
   RenderBox? _childBox;
   RenderBox? _parentBox;
   OverlayEntry? _overlayEntry;
+  Offset? eventLocation = Offset.zero;
   CustomPopupMenuController? _controller;
   bool _canResponse = true;
 
@@ -88,7 +101,10 @@ class _CustomPopupMenuState extends State<CustomPopupMenu> {
       ),
       clipper: _ArrowClipper(),
     );
-
+    print(
+        "父容器 ${_parentBox!.size}  ${_parentBox!.localToGlobal(Offset.zero)} ${_parentBox!.globalToLocal(Offset.zero)}");
+    print(
+        "子容器 ${_childBox!.size}  ${_childBox!.localToGlobal(Offset.zero)} ${_childBox!.globalToLocal(Offset.zero)}");
     _overlayEntry = OverlayEntry(
       builder: (context) {
         Widget menu = Center(
@@ -99,6 +115,8 @@ class _CustomPopupMenuState extends State<CustomPopupMenu> {
             ),
             child: CustomMultiChildLayout(
               delegate: _MenuLayoutDelegate(
+                itemSize: _childBox?.size ?? Size.zero,
+                tapedPoint: _controller?.localPosition ?? Offset.zero,
                 anchorSize: _childBox!.size,
                 anchorOffset: _childBox!.localToGlobal(
                   Offset(-widget.horizontalMargin, 0),
@@ -147,6 +165,7 @@ class _CustomPopupMenuState extends State<CustomPopupMenu> {
                 Offset(offset.dx - widget.horizontalMargin, offset.dy))) {
               return;
             }
+            _controller?.localPosition = event.localPosition;
             _controller?.hideMenu();
             // When [enablePassEvent] works and we tap the [child] to [hideMenu],
             // but the passed event would trigger [showMenu] again.
@@ -217,6 +236,12 @@ class _CustomPopupMenuState extends State<CustomPopupMenu> {
         splashColor: Colors.transparent,
         highlightColor: Colors.transparent,
         child: widget.child,
+        onTapDown: (detail) {
+          _controller?.localPosition = detail.localPosition;
+        },
+        onTapUp: (detail) {
+          _controller?.localPosition = detail.localPosition;
+        },
         onTap: () {
           if (widget.pressType == PressType.singleClick && _canResponse) {
             _controller?.showMenu();
@@ -264,9 +289,15 @@ class _MenuLayoutDelegate extends MultiChildLayoutDelegate {
     required this.anchorSize,
     required this.anchorOffset,
     required this.verticalMargin,
+    required this.tapedPoint,
+    required this.itemSize,
     this.position,
   });
 
+  // 消息列表的的大小
+  final Size itemSize;
+  /// 消息列表点击的位置
+  final Offset tapedPoint;
   final Size anchorSize;
   final Offset anchorOffset;
   final double verticalMargin;
@@ -302,13 +333,19 @@ class _MenuLayoutDelegate extends MultiChildLayoutDelegate {
         BoxConstraints.loose(size),
       );
     }
-
+    print("文本内容大小 $size $contentSize 子 $itemSize $anchorOffset  点击位置$tapedPoint");
     bool isTop = false;
     if (position == null) {
       // auto calculate position
       isTop = anchorBottomY > size.height / 2;
     } else {
       isTop = position == PreferredPosition.top;
+    }
+
+    // 长消息上滑后底部有充分的空间才可以
+    if (itemSize.height  + anchorOffset.dy - size.height <
+        -(contentSize.height * 1.2  + arrowOffset.dy + verticalMargin) && anchorOffset.dy < 0) {
+      isTop = false;
     }
     if (anchorCenterX - contentSize.width / 2 < 0) {
       menuPosition = isTop ? _MenuPosition.topLeft : _MenuPosition.bottomLeft;
@@ -347,13 +384,31 @@ class _MenuLayoutDelegate extends MultiChildLayoutDelegate {
         );
         break;
       case _MenuPosition.topCenter:
+        double contentOffsetY = 0.0;
+        double arrowOffsetY = 0.0;
+        if (anchorTopY <= contentSize.height) {
+          // 使用 点击位置
+          contentOffsetY =
+              tapedPoint.dy - contentSize.height + anchorTopY - verticalMargin;
+          arrowOffsetY = tapedPoint.dy + anchorTopY - verticalMargin;
+        } else {
+          arrowOffsetY = math.max(
+              anchorTopY - verticalMargin - arrowSize.height,
+              contentSize.height * 2);
+          contentOffsetY = math.max(
+              anchorTopY -
+                  verticalMargin -
+                  arrowSize.height -
+                  contentSize.height,
+              contentSize.height);
+        }
         arrowOffset = Offset(
           anchorCenterX - arrowSize.width / 2,
-          anchorTopY - verticalMargin - arrowSize.height,
+          arrowOffsetY,
         );
         contentOffset = Offset(
           anchorCenterX - contentSize.width / 2,
-          anchorTopY - verticalMargin - arrowSize.height - contentSize.height,
+          contentOffsetY,
         );
         break;
       case _MenuPosition.topLeft:
